@@ -1,0 +1,21 @@
+name: "openwrt on host"
+rootfs: /var/lib/openwrt/.rootfs
+container_name: openwrt-on-host
+data_path: /var/lib/openwrt
+netns: op_on_host
+netns_path: /run/netns/op_on_host
+cgroup_parent: system.slice
+extra_params:
+  - "--cgroup-conf=memory.high=715827882"
+nics_list:
+  - nic: br-normal
+    # type: bridge, interface
+    type: bridge
+  - nic: enp8s0f0
+    type: interface
+  - nic: enp8s0f1
+    type: interface
+  - nic: enp8s0f2
+    type: interface
+  - nic: enp8s0f3
+    type: interface
