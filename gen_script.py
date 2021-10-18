@@ -29,7 +29,7 @@ class Unit:
 
     def _script_head(self):
         self._write("#!/bin/bash")
-        self._write("set -xe")
+        self._write("set -e")
         self._write("\n# auto generated unit files, DO NOT EDIT!\n")
 
     def _cleanup_netns(self):
@@ -37,15 +37,11 @@ class Unit:
         for nic in self._cfg['nics_list']:
             if nic['type'] == 'bridge':
                 self._comment(f"cleanup veth pair: {nic['veth_prefix']}")
-                self._write(f"!{_ip} link set {nic['veth_prefix']}2 down")
-                self._write(f"!{_ip} link del {nic['veth_prefix']}2")
-            elif nic['type'] == 'interface':
-                self._comment(f"release imported interface: {nic['nic']}")
-                self._write(f"{_ip} netns exec ip link set {nic['nic']} down")
-                self._write(f"{_ip} netns exec ip link set {nic['nic']} netns 1")
-        self._comment("delete old netns")
+                self._write(f"! {_ip} link set {nic['veth_prefix']}2 down")
+                self._write(f"! {_ip} link del {nic['veth_prefix']}2")
+            if nic['type'] == 'interface':
+                self._write(f"! {_ip} netns exec {self._cfg['netns']} ip link set {nic['nic']} netns 1")
         self._write(f"! {_ip} netns del {self._cfg['netns']}")
-
 
     def _cleanup_container(self):
         self._comment("cleanup old container")
@@ -53,8 +49,8 @@ class Unit:
 
     def _cleanup_cidpid(self):
         self._comment("delete old cid pid files")
-        self._write(f"! rm -f /run/{self._cfg['container_name']}.cid {_discard}")
-        self._write(f"! rm -f /run/{self._cfg['container_name']}.pid {_discard}")
+        self._write(f"! rm -f /run/{self._cfg['container_name']}-cid {_discard}")
+        self._write(f"! rm -f /run/{self._cfg['container_name']}-pid {_discard}")
         self._write()
 
 
@@ -122,13 +118,18 @@ class UnitRun(Unit):
         self._write(f"\t--rootfs {self._cfg['rootfs']} {' '.join(self._entry)}")
 
 
-class UnitPostStop(Unit):
+class UnitStop(Unit):
 
     def __init__(self, cfg):
         super().__init__(cfg)
 
+    def _stop_container(self):
+        self._comment(f"stop container {self._cfg['container_name']}")
+        self._write(f"! {_podman} stop {self._cfg['container_name']}")
+
     def create_unit_file(self):
         self._script_head()
+        self._stop_container()
         self._clean_up()
         return self._buffer.getvalue()
 
@@ -174,8 +175,7 @@ class SystemdUnitFile:
     def _Service(self):
         service_kv = {
             "ExecStart": f"{_bash} {self._cfg['data_path']}/unit.run",
-            "ExecStop": f"-{_podman} stop {self._cfg['container_name']}",
-            "ExecStopPost": f"-{_bash} {self._cfg['data_path']}/unit.poststop",
+            "ExecStop": f"{_bash} {self._cfg['data_path']}/unit.stop",
             "KillMode": "control-group",
             "Restart": "always",
             "RestartSec": "10s",
@@ -184,10 +184,10 @@ class SystemdUnitFile:
             "StartLimitInterval": "6min",
             "StartLimitBurst": "5",
             "Type": "forking",
-            "PIDFile": "%t/%n-pid",
+            "PIDFile": "%t/%N-pid",
             "Delegate": "yes",
-            "ExecStartPre": "-/bin/rm -f %t/%n-pid %t/%n-cid",
-            "ExecStopPost": "-/bin/rm -f %t/%n-pid %t/%n-cid",
+            "ExecStartPre": "-/bin/rm -f %t/%N-pid %t/%N-cid",
+            "ExecStopPost": "-/bin/rm -f %t/%N-pid %t/%N-cid",
         }
         self._write("[Service]")
         for k, v in service_kv.items():
@@ -204,14 +204,14 @@ def main(args):
     config_file = Path(args.config)
     text_only = args.noout
     unit_run = Path(args.unit_run)
-    unit_poststop = Path(args.unit_poststop)
+    unit_stop = Path(args.unit_stop)
     systemd_file = Path(args.systemd_file)
 
     with open(config_file, 'r') as cfg_file:
         try:
             cfg = yaml.safe_load(cfg_file)
             ur = UnitRun(cfg).create_unit_file()
-            ups = UnitPostStop(cfg).create_unit_file()
+            ups = UnitStop(cfg).create_unit_file()
             sf = SystemdUnitFile(cfg).create_unit_file()
         except Exception as e:
             print(e)
@@ -221,7 +221,7 @@ def main(args):
     else:
         with open(unit_run, "w") as f:
             f.write(ur)
-        with open(unit_poststop, "w") as f:
+        with open(unit_stop, "w") as f:
             f.write(ups)
         with open(systemd_file, "w") as f:
             f.write(sf)
@@ -239,8 +239,8 @@ if __name__ == "__main__":
         "--unit-run", type=str, default="unit.run",
         help="path for storing start unit file(default: unit.run)")
     parser.add_argument(
-        "--unit-poststop", type=str, default="unit.poststop",
-        help="path for storing poststop unit file(default: unit.poststop)")
+        "--unit-stop", type=str, default="unit.stop",
+        help="path for storing stop unit file(default: unit.stop)")
     parser.add_argument(
         "--systemd-file", type=str, default="openwrt-on-podman.service",
         help="path for storing systemd unit file(default: openwrt-on-podman.service)")
