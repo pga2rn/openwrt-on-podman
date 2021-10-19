@@ -100,15 +100,18 @@ class UnitRun(Unit):
         self._write(f"{_podman} run \\")
         # container name
         self._write(f"\t--name {self._cfg['container_name']} \\")
-        # run on background, rm
-        self._write(f"\t--rm -d \\")
+        # run on background, replace the existed container, read-only fs
+        self._write(f"\t-d --replace --read-only \\")
+        # restart policy, always restart
+        self._write(f"\t--restart=always \\")
         # cap add
         self._write(f"\t--cap-add={','.join(self._caps)} \\")
         # cgroup
         self._write(f"\t--cgroup-parent={self._cfg['cgroup_parent']} \\")
-        # cidfile, pidfile
+        # cidfile, pidfile, conmonpidfile
         self._write(f"\t--cidfile=/run/{self._cfg['container_name']}-cid \\")
         self._write(f"\t--pidfile=/run/{self._cfg['container_name']}-pid \\")
+        self._write(f"\t--conmon-pidfile=/run/{self._cfg['container_name']}-conmonpid \\")
         # netns
         self._write(f"\t--network=ns:{self._cfg['netns_path']} \\")
         # extra params passed to podman run
@@ -184,7 +187,7 @@ class SystemdUnitFile:
             "StartLimitInterval": "6min",
             "StartLimitBurst": "5",
             "Type": "forking",
-            "PIDFile": "%t/%N-pid",
+            "PIDFile": "%t/%N-conmonpid",
             "Delegate": "yes",
             "ExecStartPre": "-/bin/rm -f %t/%N-pid %t/%N-cid",
             "ExecStopPost": "-/bin/rm -f %t/%N-pid %t/%N-cid",
