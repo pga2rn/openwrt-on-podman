@@ -93,6 +93,9 @@ class UnitRun(Unit):
             elif nic['type'] == 'interface':
                 self._write(f"{_ip} link set {nic['nic']} netns {self._cfg['netns']}")
 
+        self._comment("set up sysctl")
+        self._write(f"{_ip} netns exec {self._cfg['netns']} sysctl -w net.ipv4.conf.all.forwarding=1")
+        self._write(f"{_ip} netns exec {self._cfg['netns']} sysctl -w net.ipv6.conf.all.forwarding=1")
         self._write()
 
     def _setup_run(self):
