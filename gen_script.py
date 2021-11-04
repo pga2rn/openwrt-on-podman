@@ -123,6 +123,9 @@ class UnitRun(Unit):
             self._write(f"\t--sysctl={op} \\")
         # netns
         self._write(f"\t--network=ns:{self._cfg['netns_path']} \\")
+        # mount
+        for m in self._cfg['mount']:
+            self._write(f"\t-v {m} \\")
         # envs passed to container
         for env in self._cfg['env']:
             self._write(f"\t-e {env} \\")
