@@ -8,7 +8,7 @@ _ip = "/usr/sbin/ip"
 _bash = "/bin/bash"
 _podman = "/usr/bin/podman"
 # useful vars
-_discard = " 2> /dev/null"
+_discard = " > /dev/null 2>&1"
 
 
 class Unit:
@@ -93,20 +93,23 @@ class UnitRun(Unit):
             elif nic['type'] == 'interface':
                 self._write(f"{_ip} link set {nic['nic']} netns {self._cfg['netns']}")
 
-        self._comment("set up sysctl")
-        self._write(f"{_ip} netns exec {self._cfg['netns']} sysctl -w net.ipv4.conf.all.forwarding=1")
-        self._write(f"{_ip} netns exec {self._cfg['netns']} sysctl -w net.ipv6.conf.all.forwarding=1")
         self._write()
 
     def _setup_run(self):
         self._comment(f"run container {self._cfg['container_name']}")
         self._write(f"{_podman} run \\")
+        # run on background
+        self._write(f"\t-d \\")
+        # disable podman managed dns, disable podman assigned hosts file
+        self._write(f"\t--dns=none --no-hosts \\")
         # container name
         self._write(f"\t--name {self._cfg['container_name']} \\")
-        # run on background, replace the existed container, read-only fs
-        self._write(f"\t-d --replace --read-only \\")
+        # container hostname
+        self._write(f"\t-h {self._cfg['host_name']} \\")
         # restart policy, always restart
-        self._write(f"\t--restart=always \\")
+        self._write(f"\t--restart={self._cfg['restart_policy']} \\")
+        # constrain memory use
+        self._write(f"\t--memory={self._cfg['memory']} \\")
         # cap add
         self._write(f"\t--cap-add={','.join(self._caps)} \\")
         # cgroup
@@ -115,8 +118,14 @@ class UnitRun(Unit):
         self._write(f"\t--cidfile=/run/{self._cfg['container_name']}-cid \\")
         self._write(f"\t--pidfile=/run/{self._cfg['container_name']}-pid \\")
         self._write(f"\t--conmon-pidfile=/run/{self._cfg['container_name']}-conmonpid \\")
+        # sysctl options
+        for op in self._cfg['sysctl']:
+            self._write(f"\t--sysctl={op} \\")
         # netns
         self._write(f"\t--network=ns:{self._cfg['netns_path']} \\")
+        # envs passed to container
+        for env in self._cfg['env']:
+            self._write(f"\t-e {env} \\")
         # extra params passed to podman run
         for param in self._cfg['extra_params']:
             self._write(f"\t{param} \\")
@@ -211,7 +220,7 @@ def main(args):
     text_only = args.noout
     unit_run = Path(args.unit_run)
     unit_stop = Path(args.unit_stop)
-    systemd_file = Path(args.systemd_file)
+    systemd_file = args.systemd_file
 
     with open(config_file, 'r') as cfg_file:
         try:
@@ -222,15 +231,23 @@ def main(args):
         except Exception as e:
             print(e)
 
-    if text_only:
-        print(("\n"+"#"*64+"\n").join(["", ur, ups, sf]))
-    else:
-        with open(unit_run, "w") as f:
-            f.write(ur)
-        with open(unit_stop, "w") as f:
-            f.write(ups)
-        with open(systemd_file, "w") as f:
-            f.write(sf)
+        if text_only:
+            print(("\n"+"#"*64+"\n").join(["", ur, ups, sf]))
+        else:
+            with open(unit_run, "w") as f:
+                f.write(ur)
+            with open(unit_stop, "w") as f:
+                f.write(ups)
+
+            try:
+                if systemd_file:
+                    systemd_file_path = Path(systemd_file)
+                else:
+                    systemd_file_path = Path(cfg['service_name'])
+                with open(systemd_file_path.with_suffix(".service"), "w") as f:
+                    f.write(sf)
+            except:
+                raise Exception("service file name is not specified!")
 
 
 if __name__ == "__main__":
@@ -248,8 +265,8 @@ if __name__ == "__main__":
         "--unit-stop", type=str, default="unit.stop",
         help="path for storing stop unit file(default: unit.stop)")
     parser.add_argument(
-        "--systemd-file", type=str, default="openwrt-on-podman.service",
-        help="path for storing systemd unit file(default: openwrt-on-podman.service)")
+        "--systemd-file", type=str,
+        help="path for storing systemd unit file(default: <config.service_name>.service)")
     parser.add_argument(
         "--noout", "--text", action="store_true",
         help="do not generate files, but print to stdout only")
